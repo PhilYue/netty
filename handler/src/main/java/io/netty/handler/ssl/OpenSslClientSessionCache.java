@@ -1,11 +1,11 @@
 /*
- * Copyright 2020 The Netty Project
+ * Copyright 2021 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
  * with the License. You may obtain a copy of the License at:
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
@@ -15,9 +15,9 @@
  */
 package io.netty.handler.ssl;
 
+import io.netty.internal.tcnative.SSL;
 import io.netty.util.AsciiString;
 
-import javax.net.ssl.SSLException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -27,22 +27,17 @@ import java.util.Map;
 final class OpenSslClientSessionCache extends OpenSslSessionCache {
     // TODO: Should we support to have a List of OpenSslSessions for a Host/Port key and so be able to
     // support sessions for different protocols / ciphers to the same remote peer ?
-    private final Map<HostPort, OpenSslSession> sessions = new HashMap<HostPort, OpenSslSession>();
+    private final Map<HostPort, NativeSslSession> sessions = new HashMap<HostPort, NativeSslSession>();
 
     OpenSslClientSessionCache(OpenSslEngineMap engineMap) {
         super(engineMap);
     }
 
     @Override
-    protected boolean sessionCreated(OpenSslSession session) {
+    protected boolean sessionCreated(NativeSslSession session) {
         assert Thread.holdsLock(this);
-        String host = session.getPeerHost();
-        int port = session.getPeerPort();
-        if (host == null || port == -1) {
-            return false;
-        }
-        HostPort hostPort = new HostPort(host, port);
-        if (sessions.containsKey(hostPort)) {
+        HostPort hostPort = keyFor(session.getPeerHost(), session.getPeerPort());
+        if (hostPort == null || sessions.containsKey(hostPort)) {
             return false;
         }
         sessions.put(hostPort, session);
@@ -50,69 +45,57 @@ final class OpenSslClientSessionCache extends OpenSslSessionCache {
     }
 
     @Override
-    protected void sessionRemoved(OpenSslSession session) {
+    protected void sessionRemoved(NativeSslSession session) {
         assert Thread.holdsLock(this);
-        String host = session.getPeerHost();
-        int port = session.getPeerPort();
-        if (host == null || port == -1) {
+        HostPort hostPort = keyFor(session.getPeerHost(), session.getPeerPort());
+        if (hostPort == null) {
             return;
         }
-        sessions.remove(new HostPort(host, port));
+        sessions.remove(hostPort);
     }
 
-    private static boolean isProtocolEnabled(OpenSslSession session, String[] enabledProtocols) {
-        return arrayContains(session.getProtocol(), enabledProtocols);
-    }
-
-    private static boolean isCipherSuiteEnabled(OpenSslSession session, String[] enabledCipherSuites) {
-        return arrayContains(session.getCipherSuite(), enabledCipherSuites);
-    }
-
-    private static boolean arrayContains(String expected, String[] array) {
-        for (int i = 0; i < array.length; ++i) {
-            String value = array[i];
-            if (value.equals(expected)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    void setSession(ReferenceCountedOpenSslEngine engine) throws SSLException {
-        String host = engine.getPeerHost();
-        int port = engine.getPeerPort();
-        if (host == null || port == -1) {
+    @Override
+    void setSession(long ssl, String host, int port) {
+        HostPort hostPort = keyFor(host, port);
+        if (hostPort == null) {
             return;
         }
-        HostPort hostPort = new HostPort(host, port);
+        final NativeSslSession session;
+        final boolean reused;
         synchronized (this) {
-            OpenSslSession session = sessions.get(hostPort);
-
+            session = sessions.get(hostPort);
             if (session == null) {
                 return;
             }
             if (!session.isValid()) {
-                removeSession(session);
+                removeSessionWithId(session.sessionId());
                 return;
             }
-
-            // Ensure the protocol and ciphersuite can be used.
-            if (!isProtocolEnabled(session, engine.getEnabledProtocols()) ||
-                    !isCipherSuiteEnabled(session, engine.getEnabledCipherSuites())) {
-                return;
-            }
-
-            // Try to set the session, if true is returned we retained the session and incremented the reference count
+            // Try to set the session, if true is returned OpenSSL incremented the reference count
             // of the underlying SSL_SESSION*.
-            if (engine.setSession(session)) {
-                session.updateLastAccessedTime();
-
-                if (io.netty.internal.tcnative.SSLSession.shouldBeSingleUse(session.nativeAddr())) {
-                    // Should only be re-used once so remove it from the cache
-                    removeSession(session);
-                }
-            }
+            reused = SSL.setSession(ssl, session.session());
         }
+
+        if (reused) {
+            if (session.shouldBeSingleUse()) {
+                // Should only be used once
+                session.invalidate();
+            }
+            session.updateLastAccessedTime();
+        }
+    }
+
+    private static HostPort keyFor(String host, int port) {
+        if (host == null && port < 1) {
+            return null;
+        }
+        return new HostPort(host, port);
+    }
+
+    @Override
+    synchronized void clear() {
+        super.clear();
+        sessions.clear();
     }
 
     /**
@@ -142,6 +125,14 @@ final class OpenSslClientSessionCache extends OpenSslSessionCache {
             }
             HostPort other = (HostPort) obj;
             return port == other.port && host.equalsIgnoreCase(other.host);
+        }
+
+        @Override
+        public String toString() {
+            return "HostPort{" +
+                    "host='" + host + '\'' +
+                    ", port=" + port +
+                    '}';
         }
     }
 }
