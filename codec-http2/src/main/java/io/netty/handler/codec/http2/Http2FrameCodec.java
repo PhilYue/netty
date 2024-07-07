@@ -32,8 +32,6 @@ import io.netty.util.ReferenceCountUtil;
 import io.netty.util.ReferenceCounted;
 import io.netty.util.collection.IntObjectHashMap;
 import io.netty.util.collection.IntObjectMap;
-import io.netty.util.internal.UnstableApi;
-import io.netty.util.internal.logging.InternalLogLevel;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 
@@ -41,6 +39,7 @@ import static io.netty.buffer.ByteBufUtil.writeAscii;
 import static io.netty.handler.codec.http2.Http2CodecUtil.HTTP_UPGRADE_STREAM_ID;
 import static io.netty.handler.codec.http2.Http2CodecUtil.isStreamIdValid;
 import static io.netty.handler.codec.http2.Http2Error.NO_ERROR;
+import static io.netty.util.internal.logging.InternalLogLevel.DEBUG;
 
 /**
  * <p><em>This API is very immature.</em> The Http2Connection-based API is currently preferred over this API.
@@ -144,10 +143,14 @@ import static io.netty.handler.codec.http2.Http2Error.NO_ERROR;
  * Server-side HTTP to HTTP/2 upgrade is supported in conjunction with {@link Http2ServerUpgradeCodec}; the necessary
  * HTTP-to-HTTP/2 conversion is performed automatically.
  */
-@UnstableApi
 public class Http2FrameCodec extends Http2ConnectionHandler {
 
     private static final InternalLogger LOG = InternalLoggerFactory.getInstance(Http2FrameCodec.class);
+
+    private static final Class<?>[] SUPPORTED_MESSAGES = new Class[] {
+            Http2DataFrame.class, Http2HeadersFrame.class, Http2WindowUpdateFrame.class, Http2ResetFrame.class,
+            Http2PingFrame.class, Http2SettingsFrame.class, Http2SettingsAckFrame.class, Http2GoAwayFrame.class,
+            Http2PushPromiseFrame.class, Http2PriorityFrame.class, Http2UnknownFrame.class };
 
     protected final PropertyKey streamKey;
     private final PropertyKey upgradeKey;
@@ -164,8 +167,8 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
             new IntObjectHashMap<DefaultHttp2FrameStream>(8);
 
     Http2FrameCodec(Http2ConnectionEncoder encoder, Http2ConnectionDecoder decoder, Http2Settings initialSettings,
-                    boolean decoupleCloseAndGoAway) {
-        super(decoder, encoder, initialSettings, decoupleCloseAndGoAway);
+                    boolean decoupleCloseAndGoAway, boolean flushPreface) {
+        super(decoder, encoder, initialSettings, decoupleCloseAndGoAway, flushPreface);
 
         decoder.frameListener(new FrameListener());
         connection().addListener(new ConnectionListener());
@@ -285,8 +288,13 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
                 upgrade.release();
             }
         } else {
+            onUserEventTriggered(ctx, evt);
             ctx.fireUserEventTriggered(evt);
         }
+    }
+
+    void onUserEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
+        // noop
     }
 
     /**
@@ -354,7 +362,7 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
             ctx.write(msg, promise);
         } else {
             ReferenceCountUtil.release(msg);
-            throw new UnsupportedMessageTypeException(msg);
+            throw new UnsupportedMessageTypeException(msg, SUPPORTED_MESSAGES);
         }
     }
 
@@ -393,12 +401,14 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
     }
 
     private void writeHeadersFrame(final ChannelHandlerContext ctx, Http2HeadersFrame headersFrame,
-                                   final ChannelPromise promise) {
+                                   ChannelPromise promise) {
 
         if (isStreamIdValid(headersFrame.stream().id())) {
             encoder().writeHeaders(ctx, headersFrame.stream().id(), headersFrame.headers(), headersFrame.padding(),
                     headersFrame.isEndStream(), promise);
         } else if (initializeNewStream(ctx, (DefaultHttp2FrameStream) headersFrame.stream(), promise)) {
+            promise = promise.unvoid();
+
             final int streamId = headersFrame.stream().id();
 
             encoder().writeHeaders(ctx, streamId, headersFrame.headers(), headersFrame.padding(),
@@ -569,14 +579,14 @@ public class Http2FrameCodec extends Http2ConnectionHandler {
         }
     }
 
-    private void onHttp2UnknownStreamError(@SuppressWarnings("unused") ChannelHandlerContext ctx, Throwable cause,
-                                           Http2Exception.StreamException streamException) {
-        // It is normal to hit a race condition where we still receive frames for a stream that this
-        // peer has deemed closed, such as if this peer sends a RST(CANCEL) to discard the request.
-        // Since this is likely to be normal we log at DEBUG level.
-        InternalLogLevel level =
-                streamException.error() == Http2Error.STREAM_CLOSED ? InternalLogLevel.DEBUG : InternalLogLevel.WARN;
-        LOG.log(level, "Stream exception thrown for unknown stream {}.", streamException.streamId(), cause);
+    private static void onHttp2UnknownStreamError(@SuppressWarnings("unused") ChannelHandlerContext ctx,
+            Throwable cause, Http2Exception.StreamException streamException) {
+        // We log here for debugging purposes. This exception will be propagated to the upper layers through other ways:
+        // - fireExceptionCaught
+        // - fireUserEventTriggered(Http2ResetFrame), see Http2MultiplexHandler#channelRead(...)
+        // - by failing write promise
+        // Receiver of the error is responsible for correct handling of this exception.
+        LOG.log(DEBUG, "Stream exception thrown for unknown stream {}.", streamException.streamId(), cause);
     }
 
     @Override

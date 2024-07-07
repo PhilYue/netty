@@ -15,12 +15,9 @@
  */
 package io.netty.handler.codec.http2;
 
-import io.netty.util.internal.UnstableApi;
-
 /**
  * Abstract implementation of {@link Http2StreamFrame}.
  */
-@UnstableApi
 public abstract class AbstractHttp2StreamFrame implements Http2StreamFrame {
 
     private Http2FrameStream stream;
@@ -45,7 +42,7 @@ public abstract class AbstractHttp2StreamFrame implements Http2StreamFrame {
             return false;
         }
         Http2StreamFrame other = (Http2StreamFrame) o;
-        return stream == other.stream() || (stream != null && stream.equals(other.stream()));
+        return stream == other.stream() || stream != null && stream.equals(other.stream());
     }
 
     @Override

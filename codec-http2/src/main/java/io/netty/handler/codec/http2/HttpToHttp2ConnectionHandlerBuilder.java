@@ -18,12 +18,10 @@ package io.netty.handler.codec.http2;
 
 import io.netty.handler.codec.http.HttpScheme;
 import io.netty.handler.codec.http2.Http2HeadersEncoder.SensitivityDetector;
-import io.netty.util.internal.UnstableApi;
 
 /**
  * Builder which builds {@link HttpToHttp2ConnectionHandler} objects.
  */
-@UnstableApi
 public final class HttpToHttp2ConnectionHandlerBuilder extends
         AbstractHttp2ConnectionHandlerBuilder<HttpToHttp2ConnectionHandler, HttpToHttp2ConnectionHandlerBuilder> {
 
@@ -93,6 +91,11 @@ public final class HttpToHttp2ConnectionHandlerBuilder extends
         return super.decoupleCloseAndGoAway(decoupleCloseAndGoAway);
     }
 
+    @Override
+    public HttpToHttp2ConnectionHandlerBuilder flushPreface(boolean flushPreface) {
+        return super.flushPreface(flushPreface);
+    }
+
     /**
      * Add {@code scheme} in {@link Http2Headers} if not already present.
      *
@@ -113,6 +116,6 @@ public final class HttpToHttp2ConnectionHandlerBuilder extends
     protected HttpToHttp2ConnectionHandler build(Http2ConnectionDecoder decoder, Http2ConnectionEncoder encoder,
                                                  Http2Settings initialSettings) {
         return new HttpToHttp2ConnectionHandler(decoder, encoder, initialSettings, isValidateHeaders(),
-                decoupleCloseAndGoAway(), httpScheme);
+                decoupleCloseAndGoAway(), flushPreface(), httpScheme);
     }
 }

@@ -22,7 +22,6 @@ import io.netty.channel.ChannelPromise;
 import io.netty.channel.CoalescingBufferQueue;
 import io.netty.handler.codec.http.HttpStatusClass;
 import io.netty.handler.codec.http2.Http2CodecUtil.SimpleChannelPromiseAggregator;
-import io.netty.util.internal.UnstableApi;
 
 import java.util.ArrayDeque;
 import java.util.Queue;
@@ -39,7 +38,6 @@ import static java.lang.Math.min;
 /**
  * Default implementation of {@link Http2ConnectionEncoder}.
  */
-@UnstableApi
 public class DefaultHttp2ConnectionEncoder implements Http2ConnectionEncoder, Http2SettingsReceivedConsumer {
     private final Http2FrameWriter frameWriter;
     private final Http2Connection connection;
@@ -98,7 +96,7 @@ public class DefaultHttp2ConnectionEncoder implements Http2ConnectionEncoder, Ht
 
         Long headerTableSize = settings.headerTableSize();
         if (headerTableSize != null) {
-            outboundHeaderConfig.maxHeaderTableSize((int) min(headerTableSize, MAX_VALUE));
+            outboundHeaderConfig.maxHeaderTableSize(headerTableSize);
         }
 
         Long maxHeaderListSize = settings.maxHeaderListSize();
@@ -545,7 +543,7 @@ public class DefaultHttp2ConnectionEncoder implements Http2ConnectionEncoder, Ht
      */
     private final class FlowControlledHeaders extends FlowControlledBase {
         private final Http2Headers headers;
-        private final boolean hasPriorty;
+        private final boolean hasPriority;
         private final int streamDependency;
         private final short weight;
         private final boolean exclusive;
@@ -555,7 +553,7 @@ public class DefaultHttp2ConnectionEncoder implements Http2ConnectionEncoder, Ht
                               int padding, boolean endOfStream, ChannelPromise promise) {
             super(stream, padding, endOfStream, promise.unvoid());
             this.headers = headers;
-            this.hasPriorty = hasPriority;
+            this.hasPriority = hasPriority;
             this.streamDependency = streamDependency;
             this.weight = weight;
             this.exclusive = exclusive;
@@ -581,7 +579,7 @@ public class DefaultHttp2ConnectionEncoder implements Http2ConnectionEncoder, Ht
             // closeStreamLocal().
             promise.addListener(this);
 
-            ChannelFuture f = sendHeaders(frameWriter, ctx, stream.id(), headers, hasPriorty, streamDependency,
+            ChannelFuture f = sendHeaders(frameWriter, ctx, stream.id(), headers, hasPriority, streamDependency,
                     weight, exclusive, padding, endOfStream, promise);
             // Writing headers may fail during the encode state if they violate HPACK limits.
             Throwable failureCause = f.cause();

@@ -16,18 +16,27 @@
 
 package io.netty.handler.codec.http2;
 
-import io.netty.util.internal.UnstableApi;
-
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 
 /**
  * Builder for the {@link Http2FrameCodec}.
  */
-@UnstableApi
 public class Http2FrameCodecBuilder extends
         AbstractHttp2ConnectionHandlerBuilder<Http2FrameCodec, Http2FrameCodecBuilder> {
 
     private Http2FrameWriter frameWriter;
+
+    /**
+     * Allows overriding behavior of existing builder.
+     * <p>
+     * Users of this constructor are responsible for invoking {@link #server(boolean)} method or overriding
+     * {@link #isServer()} method to give the builder information if the {@link Http2Connection}(s) it creates are in
+     * server or client mode.
+     *
+     * @see AbstractHttp2ConnectionHandlerBuilder
+     */
+    protected Http2FrameCodecBuilder() {
+    }
 
     Http2FrameCodecBuilder(boolean server) {
         server(server);
@@ -168,6 +177,11 @@ public class Http2FrameCodecBuilder extends
     }
 
     @Override
+    public Http2FrameCodecBuilder flushPreface(boolean flushPreface) {
+        return super.flushPreface(flushPreface);
+    }
+
+    @Override
     public int decoderEnforceMaxConsecutiveEmptyDataFrames() {
         return super.decoderEnforceMaxConsecutiveEmptyDataFrames();
     }
@@ -175,6 +189,12 @@ public class Http2FrameCodecBuilder extends
     @Override
     public Http2FrameCodecBuilder decoderEnforceMaxConsecutiveEmptyDataFrames(int maxConsecutiveEmptyFrames) {
         return super.decoderEnforceMaxConsecutiveEmptyDataFrames(maxConsecutiveEmptyFrames);
+    }
+
+    @Override
+    public Http2FrameCodecBuilder decoderEnforceMaxRstFramesPerWindow(
+            int maxRstFramesPerWindow, int secondsPerWindow) {
+        return super.decoderEnforceMaxRstFramesPerWindow(maxRstFramesPerWindow, secondsPerWindow);
     }
 
     /**
@@ -201,7 +221,7 @@ public class Http2FrameCodecBuilder extends
                 encoder = new StreamBufferingEncoder(encoder);
             }
             Http2ConnectionDecoder decoder = new DefaultHttp2ConnectionDecoder(connection, encoder, frameReader,
-                    promisedRequestVerifier(), isAutoAckSettingsFrame(), isAutoAckPingFrame());
+                    promisedRequestVerifier(), isAutoAckSettingsFrame(), isAutoAckPingFrame(), isValidateHeaders());
             int maxConsecutiveEmptyDataFrames = decoderEnforceMaxConsecutiveEmptyDataFrames();
             if (maxConsecutiveEmptyDataFrames > 0) {
                 decoder = new Http2EmptyDataFrameConnectionDecoder(decoder, maxConsecutiveEmptyDataFrames);
@@ -214,7 +234,8 @@ public class Http2FrameCodecBuilder extends
     @Override
     protected Http2FrameCodec build(
             Http2ConnectionDecoder decoder, Http2ConnectionEncoder encoder, Http2Settings initialSettings) {
-        Http2FrameCodec codec = new Http2FrameCodec(encoder, decoder, initialSettings, decoupleCloseAndGoAway());
+        Http2FrameCodec codec = new Http2FrameCodec(encoder, decoder, initialSettings,
+                decoupleCloseAndGoAway(), flushPreface());
         codec.gracefulShutdownTimeoutMillis(gracefulShutdownTimeoutMillis());
         return codec;
     }
